@@ -1,4 +1,4 @@
-/* TDA9151B I2C Bridge 
+/* RCA MM36110 15kHz-Bridge 
  *
  * Based on Martin Hejnfelt's TA1276AN I2C Bridge
  * and bsafta's fork. 
@@ -6,25 +6,17 @@
  * original: https://github.com/skumlos/TDA9151B-i2c-bridge 
  * 
  * This software uses an Arduino Nano V3 and sits between a monitor's 
- * main microcontroller and the TDA9151B convergence IC, and acts as 
- * a man-in-the-middle to modify I2C commands to the convergence IC. Its 
- * current implementation is for an RCA MM36110, with the two functions being
- * to shift the image horizontally when an RGB mod is activated, and to 
- * enable 16:9 mode which for some reason RCA didn't implement by default. 
+ * main microcontroller and the U38300, and acts as 
+ * a man-in-the-middle to modify an errant I2C signal that causes
+ * visual glitches when 15kHz content is displayed over VGA on the RCA
+ * MM36110.
  *
  */
 
  //Version 1.0
 
-// THE FOLLOWING VALUE SHOULD BE SET BASED ON YOUR PERSONAL PREFERENCES FOR YOUR MONITOR.
-// THIS IS SET TO WHAT WORKED FOR ME ON MY RCA MM36110, YOUR MILEAGE MAY VARY
-// 0 = no offset, positive integers = positive offset, negative = negative
-
-const int8_t horPhaseOffset = -7; //Tells the jungle how much to offset horizontal position. 
-
-// Values that tell functions whether RGB and 16:9 mods are running or not. Don't mess with this except for testing purposes.
-volatile bool RGBModEnabled = false;
-volatile bool WidescreenEnabled = false;
+// Value that tells functions whether VGA inputs are active or not.
+volatile bool VGAactive = false;
 
 // READ_DELAY defines how often the bridge refreshes a cached downstream read value.
 // Keep this relatively slow so the bridge spends less time bit-banging while the
@@ -44,35 +36,16 @@ volatile bool WidescreenEnabled = false;
 #define SDA_PIN 4 // = PD4
 #define SCL_PORT PORTD
 #define SCL_PIN 5 // = PD5
-#define RGB_PIN 6 // = PD6 - this is the pin that will be used to activate the mod - use a 10k pulldown to ground
-#define WIDESCREEN_PIN 7 //PD7 - this pin when high will enable Widescreen - use a 10k pulldown to ground
+#define VGA_PIN 6 // = PD6 - this is the pin that when high activate the mod - use a 10k pulldown to ground
 
 #include <SoftI2CMaster.h>
 #include <Wire.h>
-// Address in the datasheet is said to be 0x8C. That is somewhat of a 
-// "mistake" as i2c uses 7 bit addressing and the least significant bit
-// is read (1) or write (0). Thus the address is shifted once
-// to the right to get the "real" address which is then 46h/70
-#define TDA9151B_ADDR (0x46)
+#define U38300_ADDR (0x46)
 
 // Not all of these are used. I just went ahead and listed them all for convenience
 // for potential future versions. 
 #define REG_VERT_AMP (0x00) // Vertical Amplitude
 #define REG_VERT_S_COR (0x01) // Vertical S Correction
-#define REG_VSS (0x02) // Vertical Start Scan
-#define REG_VOCS_TRAP (0x03) // Vertical off-centre shift AND trapezium correction
-#define REG_WIDTH (0x04) // EW width/width ratio
-#define REG_PARABOLA (0x05) // EW parabola/width ratio
-#define REG_CORNER (0x06) // EW corner/parabola ratio
-#define REG_EHT (0x07) // EHT compensation
-#define REG_HOR_PHASE (0x08) // Horizontal Phase
-#define REG_HOR_SHIFT (0x09) //Horizontal off-center shift
-#define REG_CLAMP_SHIFT (0x0A) //Clamp shift
-#define REG_CONTROL_1 (0x0B) //Control 1
-#define REG_VERT_SLOPE_MSB (0x0C) // Vertical Slope MSB
-#define REG_VERT_SLOPE_LSB (0x0D) // Vert Slope LSB
-#define REG_VERT_WAIT (0x0E) // Vertical Wait
-#define REG_CONTROL_2 (0x0F) // Control 2
 
 struct RxFrame {
   uint8_t len;
@@ -87,15 +60,14 @@ volatile uint8_t rxCount = 0;
 volatile uint32_t lastMcuActivityUs = 0;
 
 void setup() {
-  //Commented out serial.begin to save on startup time, I don't run my arduino on standby power, it 
-  //turns on when the TV does, and quick startup is a priority. Re-enable for debug if necessary. 
+  //Commented out serial.begin as unnecessary. Re-enable for debug if necessary. 
 
   //Serial.begin(115200); 
-  //Serial.print("TDA9151B I2C Bridge\n");
+  //Serial.print("RCA-MM36110-15kHz-Bridge\n");
 
   //I2C Startup
   bool iicinit = i2c_init();
-  Wire.begin(TDA9151B_ADDR);
+  Wire.begin(U38300_ADDR);
   Wire.onReceive(writeRequest);
   Wire.onRequest(readRequest);
   if(!iicinit) Serial.println("I2C init failed");
@@ -108,7 +80,7 @@ void setup() {
 }
 
 void writeRegister(const uint8_t reg, const uint8_t val) {
-  i2c_start((TDA9151B_ADDR<<1)|I2C_WRITE);
+  i2c_start((U38300_ADDR<<1)|I2C_WRITE);
   i2c_write(reg);
   i2c_write(val);
   i2c_stop(); 
@@ -200,7 +172,7 @@ void processFrame(const RxFrame &frame) {
   }
 
   // len==1 is treated as register-pointer write for a possible following read.
-  i2c_start((TDA9151B_ADDR << 1) | I2C_WRITE);
+  i2c_start((U38300_ADDR << 1) | I2C_WRITE);
   i2c_write(frame.bytes[0]);
 
   if (frame.len > 1) {
@@ -225,11 +197,11 @@ void processFrame(const RxFrame &frame) {
 
 void readDownstream() {
   
-  /*if (!i2c_start((TDA9151B_ADDR << 1) | I2C_READ)) {
+  /*if (!i2c_start((U38300_ADDR << 1) | I2C_READ)) {
     i2c_stop();
     return;
   }*/
-  i2c_start((TDA9151B_ADDR << 1) | I2C_READ);
+  i2c_start((U38300_ADDR << 1) | I2C_READ);
   uint8_t tmp0 = i2c_read(true);
   i2c_stop();
 
@@ -247,8 +219,7 @@ void loop() {
  // Non-blocking: check mod status every ~250ms.
   if (now - lastCheck >= CHECK_DELAY) {
     lastCheck = now;
-    RGBModEnabled = (PIND & (1 << RGB_PIN)); //NOTE these use direct addressing and may not work if you reassign pins that are on different ports
-    WidescreenEnabled = (PIND & (1 << WIDESCREEN_PIN));
+    RGBModEnabled = (PIND & (1 << RGB_PIN)); //NOTE this uses direct addressing for speed
   }
 
   if (isMcuBusIdle()) {
