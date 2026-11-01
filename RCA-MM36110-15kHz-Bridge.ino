@@ -6,13 +6,12 @@
  * original: https://github.com/skumlos/TDA9151B-i2c-bridge 
  * 
  * This software uses an Arduino Nano V3 and sits between a RCA MM36110's 
- * main microcontroller and the input-switching IC labeled U38300, and acts as 
- * a man-in-the-middle to modify an errant I2C signal that causes
+ * main microcontroller and the frequency detection IC U22407, a Toshiba TA1300AN. 
+ * Acts as a man-in-the-middle to modify an errant I2C signal that causes
  * visual glitches when 15kHz content is displayed over VGA. This removes the infamous 
  * "garbage pixel artifacts" mentioned on the CRT database. 
  * The code has no other fuction at present, although it could theoretically have 
- * interesting applications for input switching modifications on the MM36110 and
- * potentially MM36100.
+ * other interesting applications as this IC is quite important to the set's operation.
  */
 
  //Version 1.0
@@ -42,7 +41,7 @@ volatile bool VGAactive = false;
 
 #include <SoftI2CMaster.h>
 #include <Wire.h>
-#define U38300_ADDR (0x24)
+#define TA1300AN_ADDR (0x24)
  
 #define PROBLEM_REG (0x00) // the problematic register 
 #define PROBLEM_VAL (0x80) // the problematic value
@@ -67,7 +66,7 @@ void setup() {
 
   //I2C Startup
   bool iicinit = i2c_init();
-  Wire.begin(U38300_ADDR);
+  Wire.begin(TA1300AN_ADDR);
   Wire.onReceive(writeRequest);
   Wire.onRequest(readRequest);
   // if(!iicinit) Serial.println("I2C init failed"); commented out since serial is disabled
@@ -78,7 +77,7 @@ void setup() {
 }
 
 void writeRegister(const uint8_t reg, const uint8_t val) {
-  i2c_start((U38300_ADDR<<1)|I2C_WRITE);
+  i2c_start((TA1300AN_ADDR<<1)|I2C_WRITE);
   i2c_write(reg);
   i2c_write(val);
   i2c_stop(); 
@@ -111,7 +110,7 @@ void writeRequest(int byteCount) {
   }
 }
 
-// Set up two-byte array to hold values read from U38300
+// Set up two-byte array to hold values read from TA1300AN
 volatile uint8_t r[2] = {0, 0};
 
 void readRequest() {
@@ -148,7 +147,7 @@ void processFrame(const RxFrame &frame) {
   }
 
   // len==1 is treated as register-pointer write for a possible following read.
-  i2c_start((U38300_ADDR << 1) | I2C_WRITE);
+  i2c_start((TA1300AN_ADDR << 1) | I2C_WRITE);
   i2c_write(frame.bytes[0]);
 
   if (frame.len > 1) {
@@ -170,7 +169,7 @@ void processFrame(const RxFrame &frame) {
 
 void readDownstream() {
  
-  i2c_start((U38300_ADDR << 1) | I2C_READ);
+  i2c_start((TA1300AN_ADDR << 1) | I2C_READ);
   uint8_t tmp0 = i2c_read(false); //read byte and proceed to next
   uint8_t tmp1 = i2c_read(true);  // send stop signal
   i2c_stop();
