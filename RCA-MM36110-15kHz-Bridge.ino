@@ -70,7 +70,7 @@ void setup() {
   Wire.begin(U38300_ADDR);
   Wire.onReceive(writeRequest);
   Wire.onRequest(readRequest);
-  if(!iicinit) Serial.println("I2C init failed");
+  // if(!iicinit) Serial.println("I2C init failed"); commented out since serial is disabled
 
   //configure pins 
   pinMode(VGA_PIN, INPUT); //configure switch pin as input - 10k pulldown resistor to ground
@@ -174,8 +174,10 @@ void readDownstream() {
   uint8_t tmp0 = i2c_read(false); //read byte and proceed to next
   uint8_t tmp1 = i2c_read(true);  // send stop signal
   i2c_stop();
+  noInterrupts();
   r[0] = tmp0; //write to array
   r[1] = tmp1;
+  interrupts();
 }
 
 void loop() {
