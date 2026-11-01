@@ -156,7 +156,7 @@ void processFrame(const RxFrame &frame) {
 
     for (uint8_t i = 1; i < frame.len; ++i) {
       uint8_t val = frame.bytes[i];
-      if (reg == REG_HOR_PHASE && VGA) {
+      if (reg == PROBLEM_REG && val == PROBLEM_VAL && VGA) {
         val = 0x00;
       } 
       i2c_write(val);
