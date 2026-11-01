@@ -5,12 +5,14 @@
  * basfta fork: https://github.com/bsafta/TDA9151B-i2c-bridge 
  * original: https://github.com/skumlos/TDA9151B-i2c-bridge 
  * 
- * This software uses an Arduino Nano V3 and sits between a monitor's 
+ * This software uses an Arduino Nano V3 and sits between a RCA MM36110's 
  * main microcontroller and the U38300, and acts as 
  * a man-in-the-middle to modify an errant I2C signal that causes
- * visual glitches when 15kHz content is displayed over VGA on the RCA
- * MM36110.
- *
+ * visual glitches when 15kHz content is displayed over VGA. The infamous 
+ * "garbage pixel artifacts" mentioned on the CRT database. 
+ * The code has no other fuction at present although it could theoretically have 
+ * interesting applications for input switching modifications on the MM36110 and
+ * potentially MM36100.
  */
 
  //Version 1.0
@@ -40,10 +42,8 @@ volatile bool VGAactive = false;
 
 #include <SoftI2CMaster.h>
 #include <Wire.h>
-#define U38300_ADDR (0x46)
-
-// Not all of these are used. I just went ahead and listed them all for convenience
-// for potential future versions. 
+#define U38300_ADDR (0x24)
+ 
 #define REG_VERT_AMP (0x00) // Vertical Amplitude
 #define REG_VERT_S_COR (0x01) // Vertical S Correction
 
@@ -75,8 +75,7 @@ void setup() {
   //configure pins 
   pinMode(RGB_PIN, INPUT); //configure switch pin as input - 10k pulldown resistor to ground
   pinMode(WIDESCREEN_PIN, INPUT); //configure VM pin as input - 10k pulldown resistor to ground
-  RGBModEnabled = (PIND & (1 << RGB_PIN)); //NOTE these use direct addressing and may not work if you reassign pins that are on different ports
-  WidescreenEnabled = (PIND & (1 << WIDESCREEN_PIN));
+  VGAactive = (PIND & (1 << RGB_PIN)); // direct addressing, faster
 }
 
 void writeRegister(const uint8_t reg, const uint8_t val) {
@@ -177,7 +176,7 @@ void processFrame(const RxFrame &frame) {
 
   if (frame.len > 1) {
     uint8_t reg = frame.bytes[0];
-    bool rgbEnabled = RGBModEnabled;
+    bool rgbEnabled = VGAactive;
     bool widescreenEnabled = WidescreenEnabled;
 
     for (uint8_t i = 1; i < frame.len; ++i) {
@@ -219,7 +218,7 @@ void loop() {
  // Non-blocking: check mod status every ~250ms.
   if (now - lastCheck >= CHECK_DELAY) {
     lastCheck = now;
-    RGBModEnabled = (PIND & (1 << RGB_PIN)); //NOTE this uses direct addressing for speed
+    VGAactive = (PIND & (1 << RGB_PIN)); //NOTE this uses direct addressing for speed
   }
 
   if (isMcuBusIdle()) {
