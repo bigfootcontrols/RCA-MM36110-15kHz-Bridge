@@ -6,11 +6,11 @@
  * original: https://github.com/skumlos/TDA9151B-i2c-bridge 
  * 
  * This software uses an Arduino Nano V3 and sits between a RCA MM36110's 
- * main microcontroller and the U38300, and acts as 
+ * main microcontroller and the input-switching IC labeled U38300, and acts as 
  * a man-in-the-middle to modify an errant I2C signal that causes
- * visual glitches when 15kHz content is displayed over VGA. The infamous 
+ * visual glitches when 15kHz content is displayed over VGA. This removes the infamous 
  * "garbage pixel artifacts" mentioned on the CRT database. 
- * The code has no other fuction at present although it could theoretically have 
+ * The code has no other fuction at present, although it could theoretically have 
  * interesting applications for input switching modifications on the MM36110 and
  * potentially MM36100.
  */
@@ -35,17 +35,17 @@ volatile bool VGAactive = false;
 
 // These work for Nano 3.0
 #define SDA_PORT PORTD
-#define SDA_PIN 4 // = PD4
+#define SDA_PIN 4 // = PD4 - don't forget to add 2.7k pullup resistor to VCC
 #define SCL_PORT PORTD
-#define SCL_PIN 5 // = PD5
-#define VGA_PIN 6 // = PD6 - this is the pin that when high activate the mod - use a 10k pulldown to ground
+#define SCL_PIN 5 // = PD5 - - don't forget to add 2.7k pullup resistor to VCC
+#define VGA_PIN 6 // = PD6 - this is the pin that when high activates the mod - use a 10k pulldown to ground
 
 #include <SoftI2CMaster.h>
 #include <Wire.h>
 #define U38300_ADDR (0x24)
  
-#define REG_VERT_AMP (0x00) // Vertical Amplitude
-#define REG_VERT_S_COR (0x01) // Vertical S Correction
+#define PROBLEM_REG (0x00) // the problematic register 
+#define PROBLEM_VAL (0x80) // the problematic value
 
 struct RxFrame {
   uint8_t len;
@@ -73,9 +73,8 @@ void setup() {
   if(!iicinit) Serial.println("I2C init failed");
 
   //configure pins 
-  pinMode(RGB_PIN, INPUT); //configure switch pin as input - 10k pulldown resistor to ground
-  pinMode(WIDESCREEN_PIN, INPUT); //configure VM pin as input - 10k pulldown resistor to ground
-  VGAactive = (PIND & (1 << RGB_PIN)); // direct addressing, faster
+  pinMode(VGA_PIN, INPUT); //configure switch pin as input - 10k pulldown resistor to ground
+  VGAactive = (PIND & (1 << VGA_PIN)); // direct addressing, faster
 }
 
 void writeRegister(const uint8_t reg, const uint8_t val) {
@@ -112,35 +111,12 @@ void writeRequest(int byteCount) {
   }
 }
 
-
-// Offsets standard contrast value by user-defined offset to arrive at RGB contrast value
-uint8_t getHorPhaseRegValue(uint8_t val) {
-  uint8_t regValue = add_with_signed_offset(val, horPhaseOffset);
-  
-  //for debugging, DO NOT uncomment unless you need to, slows down operation
-  /*Serial.print("Original H Phase: "); 
-  Serial.print(val, BIN);
-  Serial.print(";   Mod. H Phase: ");
-  Serial.print(regValue, BIN);
-  Serial.print("\n\n");*/
-
-  return regValue;
-}
-
-// Math logic used by each of the above offset functions, can accept negative values
-uint8_t add_with_signed_offset(uint8_t base, int8_t offset) {
-  int16_t sum = (int16_t)base + (int16_t)offset;
-  if (sum > 255) return 255;
-  if (sum < 0) return 0;
-  return (uint8_t)sum;
-}
-
-
-volatile uint8_t r = 0;
+// Set up two-byte array to hold values read from U38300
+volatile uint8_t r[2] = {0, 0};
 
 void readRequest() {
   lastMcuActivityUs = micros();
-  Wire.write(r);
+  Wire.write(r,2);
 }
 
 bool isMcuBusIdle() {
@@ -176,16 +152,13 @@ void processFrame(const RxFrame &frame) {
 
   if (frame.len > 1) {
     uint8_t reg = frame.bytes[0];
-    bool rgbEnabled = VGAactive;
-    bool widescreenEnabled = WidescreenEnabled;
+    bool VGA = VGAactive;
 
     for (uint8_t i = 1; i < frame.len; ++i) {
       uint8_t val = frame.bytes[i];
-      if (reg == REG_HOR_PHASE && rgbEnabled) {
-        val = getHorPhaseRegValue(val);
-      } else if (reg == REG_CONTROL_2 && widescreenEnabled) {
-        val = 0b00001000;
-      }
+      if (reg == REG_HOR_PHASE && VGA) {
+        val = 0x00;
+      } 
       i2c_write(val);
       ++reg;
     }
@@ -195,18 +168,13 @@ void processFrame(const RxFrame &frame) {
 }
 
 void readDownstream() {
-  
-  /*if (!i2c_start((U38300_ADDR << 1) | I2C_READ)) {
-    i2c_stop();
-    return;
-  }*/
+ 
   i2c_start((U38300_ADDR << 1) | I2C_READ);
-  uint8_t tmp0 = i2c_read(true);
+  uint8_t tmp0 = i2c_read(false); //read byte and proceed to next
+  uint8_t tmp1 = i2c_read(true);  // send stop signal
   i2c_stop();
-
-  //noInterrupts();
-  r = tmp0;
-  //interrupts();
+  r[0] = tmp0; //write to array
+  r[1] = tmp1;
 }
 
 void loop() {
@@ -218,7 +186,7 @@ void loop() {
  // Non-blocking: check mod status every ~250ms.
   if (now - lastCheck >= CHECK_DELAY) {
     lastCheck = now;
-    VGAactive = (PIND & (1 << RGB_PIN)); //NOTE this uses direct addressing for speed
+    VGAactive = (PIND & (1 << VGA_PIN)); //NOTE this uses direct addressing for speed
   }
 
   if (isMcuBusIdle()) {
