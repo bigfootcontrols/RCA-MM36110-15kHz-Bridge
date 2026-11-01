@@ -116,7 +116,8 @@ volatile uint8_t r[2] = {0, 0};
 
 void readRequest() {
   lastMcuActivityUs = micros();
-  Wire.write(r,2);
+  uint8_t buf[2] = { r[0], r[1] };
+  Wire.write(buf, 2);
 }
 
 bool isMcuBusIdle() {
