@@ -2,8 +2,8 @@
  *
  * Based on Martin Hejnfelt's TA1276AN I2C Bridge
  * and bsafta's fork. 
- * basfta fork: https://github.com/bsafta/TDA9151B-i2c-bridge 
- * original: https://github.com/skumlos/TDA9151B-i2c-bridge 
+ * basfta fork: https://github.com/bsafta/ta1276an-i2c-bridge 
+ * original: https://github.com/skumlos/ta1276an-i2c-bridge 
  * 
  * This software uses an Arduino Nano V3 and sits between a RCA MM36110's 
  * main microcontroller and the frequency detection IC U22407, a Toshiba TA1300AN. 
