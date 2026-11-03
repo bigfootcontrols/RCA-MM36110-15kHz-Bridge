@@ -9,15 +9,16 @@
  * main microcontroller and the frequency detection IC U22407, a Toshiba TA1300AN. 
  * Acts as a man-in-the-middle to modify an errant I2C signal that causes
  * visual glitches when 15kHz content is displayed over VGA. This removes the infamous 
- * "garbage pixel artifacts" mentioned on the CRT database. 
- * The code has no other fuction at present, although it could theoretically have 
- * other interesting applications as this IC is quite important to the set's operation.
+ * "garbage pixel artifacts" mentioned on the CRT database.
  *
  * Suppression is qualified by the TA1300AN's own H FREQ DET read (read byte 1, bits 6:0).
  * The 0x80 write to reg 0x00 (33.75kHz) is only replaced with 0x00 (15.75kHz) while VGA is
  * active AND the IC has consistently measured a ~15kHz horizontal input. If the measured
  * frequency leaves the 15kHz window, a suppressed 0x80 is replayed so a legitimate 33kHz
  * mode change is delayed, never lost.
+ * 
+ * It also outputs a signal when 24kHz horizontal frequency is detected, for the purpose of
+ * activating my still-in-development 24kHz medium resolution mod. 
  */
 
  //Version 1.1
