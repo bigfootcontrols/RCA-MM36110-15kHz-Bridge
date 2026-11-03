@@ -12,9 +12,15 @@
  * "garbage pixel artifacts" mentioned on the CRT database. 
  * The code has no other fuction at present, although it could theoretically have 
  * other interesting applications as this IC is quite important to the set's operation.
+ *
+ * Suppression is qualified by the TA1300AN's own H FREQ DET read (read byte 1, bits 6:0).
+ * The 0x80 write to reg 0x00 (33.75kHz) is only replaced with 0x00 (15.75kHz) while VGA is
+ * active AND the IC has consistently measured a ~15kHz horizontal input. If the measured
+ * frequency leaves the 15kHz window, a suppressed 0x80 is replayed so a legitimate 33kHz
+ * mode change is delayed, never lost.
  */
 
- //Version 1.0
+ //Version 1.1
 
 // Value that tells functions whether VGA inputs are active or not.
 volatile bool VGAactive = false;
@@ -28,6 +34,22 @@ volatile bool VGAactive = false;
 #define RX_FRAME_MAX 16
 #define RX_QUEUE_SIZE 18
 
+// TA1300AN H FREQ DET (read byte 1, bits 6:0) is Y = 5 * Z * fH, with Z ~= 476us.
+// 15.75kHz -> Y ~= 37, 31.5kHz -> Y ~= 75, 33.75kHz -> Y ~= 80. 0 = no sync, 0x7F = >53kHz.
+#define H_DET_MASK 0x7F
+#define H_OUT_BIT 0x80        // read byte 1, D7: H-out self check (1 = H signal exists)
+#define H15K_Y_MIN 30         // ~12.6kHz
+#define H15K_Y_MAX 45         // ~18.9kHz
+#define H15K_STABLE_COUNT 4   // consecutive in-window polls (x READ_DELAY) before suppression is armed
+#define H15K_STALE_MS 1500    // no valid poll for this long -> stop suppressing (fail open)
+// 24kHz detection: Y ~= 57-60 measured on a real 24kHz source (15kHz reads 38, 31.5kHz reads 75).
+#define H24K_Y_MIN 50         // ~21kHz
+#define H24K_Y_MAX 66         // ~27.7kHz
+#define H24K_STABLE_COUNT 3   // consecutive in-window polls before the output is asserted
+#define H24K_RELEASE_COUNT 4  // consecutive non-24kHz polls (Y != 0) before the output is released
+#define H24K_STALE_MS 2000    // no 24kHz reading for this long -> release the output (fail safe)
+#define PENDING_REPLAY_MS 1000 // how long a suppressed write may be replayed if frequency leaves 15kHz
+
 #define I2C_TIMEOUT 10000
 #define I2C_PULLUP 0
 #define I2C_FASTMODE 1
@@ -37,6 +59,7 @@ volatile bool VGAactive = false;
 #define SDA_PIN 4 // = PD4 - don't forget to add 2.7k pullup resistor to VCC
 #define SCL_PORT PORTD
 #define SCL_PIN 5 // = PD5 - - don't forget to add 2.7k pullup resistor to VCC
+#define OUT24K_PIN 7 // = PD7 - driven high while the chassis is attempting 24kHz and VGA is active
 #define VGA_PIN 6 // = PD6 - this is the pin that when high activates the mod - use a 10k pulldown to ground
 
 #include <SoftI2CMaster.h>
@@ -58,6 +81,16 @@ volatile uint8_t rxCount = 0;
 
 volatile uint32_t lastMcuActivityUs = 0;
 
+// Main-loop-only state derived from the TA1300AN's H FREQ DET reading.
+uint8_t h15kCount = 0;           // consecutive polls inside the 15kHz window
+uint32_t lastValidPollMs = 0;    // millis() of the last successful downstream poll
+uint8_t h24kCount = 0;           // consecutive polls inside the 24kHz window
+uint8_t h24kMiss = 0;            // consecutive polls clearly outside the 24kHz window
+uint32_t lastH24kMs = 0;         // millis() of the last in-window 24kHz poll
+bool out24k = false;             // current state of the 24kHz output pin
+bool suppressPending = false;    // a 0x80 write was suppressed and may need replaying
+uint32_t suppressPendingMs = 0;  // millis() when it was first suppressed
+
 void setup() {
   //Commented out serial.begin as unnecessary. Re-enable for debug if necessary. 
 
@@ -73,6 +106,8 @@ void setup() {
 
   //configure pins 
   pinMode(VGA_PIN, INPUT); //configure switch pin as input - 10k pulldown resistor to ground
+  pinMode(OUT24K_PIN, OUTPUT);
+  digitalWrite(OUT24K_PIN, LOW);
   VGAactive = (PIND & (1 << VGA_PIN)); // direct addressing, faster
 }
 
@@ -141,6 +176,39 @@ bool popFrame(RxFrame &out) {
   return true;
 }
 
+bool hDetIs24k(const uint8_t b1) {
+  const uint8_t y = b1 & H_DET_MASK;
+  return (b1 & H_OUT_BIT) && y >= H24K_Y_MIN && y <= H24K_Y_MAX;
+}
+
+// Asserts OUT24K_PIN after a stable 24kHz reading and releases it after a stable non-24kHz
+// reading. Y == 0 (sync lost during a mode change) holds the current state; a stale or
+// failed poll, or VGA going inactive, releases it.
+void update24kOutput(const uint32_t now) {
+  bool next = out24k;
+  if (!VGAactive || (uint32_t)(now - lastH24kMs) >= H24K_STALE_MS) {
+    next = false;
+  } else if (h24kCount >= H24K_STABLE_COUNT) {
+    next = true;
+  } else if (h24kMiss >= H24K_RELEASE_COUNT) {
+    next = false;
+  }
+  if (next != out24k) {
+    out24k = next;
+    digitalWrite(OUT24K_PIN, out24k ? HIGH : LOW);
+  }
+}
+
+bool hDetIs15k(const uint8_t b1) {
+  const uint8_t y = b1 & H_DET_MASK;
+  return (b1 & H_OUT_BIT) && y >= H15K_Y_MIN && y <= H15K_Y_MAX;
+}
+
+// True only when the IC has consistently and recently measured a 15kHz horizontal input.
+bool input15kStable(const uint32_t now) {
+  return h15kCount >= H15K_STABLE_COUNT && (uint32_t)(now - lastValidPollMs) < H15K_STALE_MS;
+}
+
 void processFrame(const RxFrame &frame) {
   if (frame.len == 0) {
     return;
@@ -152,13 +220,22 @@ void processFrame(const RxFrame &frame) {
 
   if (frame.len > 1) {
     uint8_t reg = frame.bytes[0];
-    bool VGA = VGAactive;
+    bool suppress = VGAactive && input15kStable(millis());
 
     for (uint8_t i = 1; i < frame.len; ++i) {
       uint8_t val = frame.bytes[i];
-      if (reg == PROBLEM_REG && val == PROBLEM_VAL && VGA) {
-        val = 0x00;
-      } 
+      if (reg == PROBLEM_REG) {
+        if (val == PROBLEM_VAL && suppress) {
+          val = 0x00;
+          if (!suppressPending) {
+            suppressPending = true;
+            suppressPendingMs = millis();
+          }
+        } else {
+          // Monitor wrote something else (e.g. its own 0x00 correction): nothing to replay.
+          suppressPending = false;
+        }
+      }
       i2c_write(val);
       ++reg;
     }
@@ -169,7 +246,13 @@ void processFrame(const RxFrame &frame) {
 
 void readDownstream() {
  
-  i2c_start((TA1300AN_ADDR << 1) | I2C_READ);
+  if (!i2c_start((TA1300AN_ADDR << 1) | I2C_READ)) {
+    i2c_stop();
+    h15kCount = 0; // no ACK: don't trust the cache, fail open
+    h24kCount = 0;
+    update24kOutput(millis());
+    return;
+  }
   uint8_t tmp0 = i2c_read(false); //read byte and proceed to next
   uint8_t tmp1 = i2c_read(true);  // send stop signal
   i2c_stop();
@@ -177,6 +260,41 @@ void readDownstream() {
   r[0] = tmp0; //write to array
   r[1] = tmp1;
   interrupts();
+
+  lastValidPollMs = millis();
+  if (hDetIs15k(tmp1)) {
+    if (h15kCount < 255) ++h15kCount;
+  } else {
+    h15kCount = 0;
+  }
+
+  const uint32_t now = millis();
+  if (hDetIs24k(tmp1)) {
+    if (h24kCount < 255) ++h24kCount;
+    h24kMiss = 0;
+    lastH24kMs = now;
+  } else if ((tmp1 & H_DET_MASK) != 0) {
+    h24kCount = 0;
+    if (h24kMiss < 255) ++h24kMiss;
+  } else {
+    h24kCount = 0;
+  }
+  update24kOutput(now);
+}
+
+// If we suppressed a 0x80 write but the IC now reports a non-15kHz input, the write was
+// legitimate: replay it. Give up quietly once the monitor has had time to self-correct.
+void servicePendingReplay() {
+  if (!suppressPending) {
+    return;
+  }
+  uint32_t now = millis();
+  if ((uint32_t)(now - suppressPendingMs) >= PENDING_REPLAY_MS) {
+    suppressPending = false;
+  } else if (h15kCount == 0) {
+    suppressPending = false;
+    writeRegister(PROBLEM_REG, PROBLEM_VAL);
+  }
 }
 
 void loop() {
@@ -189,6 +307,7 @@ void loop() {
   if (now - lastCheck >= CHECK_DELAY) {
     lastCheck = now;
     VGAactive = (PIND & (1 << VGA_PIN)); //NOTE this uses direct addressing for speed
+    update24kOutput(now);
   }
 
   if (isMcuBusIdle()) {
@@ -204,6 +323,7 @@ void loop() {
     lastCheckRead = now;
     if (isMcuBusIdle() && rxCount == 0) {
       readDownstream();
+      servicePendingReplay();
     }
   }
 }
