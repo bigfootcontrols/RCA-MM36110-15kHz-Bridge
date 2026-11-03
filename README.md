@@ -1,14 +1,20 @@
 # RCA-MM36110-15kHz-Bridge
 
-Arduino Nano I2C man-in-the-middle between the RCA MM36110 monitor MCU and its Toshiba TA1300AN (0x24).
-It suppresses the spurious `reg 0x00 = 0x80` (33.75 kHz) write the MCU issues roughly every 7.2 s while a
-15 kHz source is shown on VGA.
+This software uses an Arduino Nano V3 as a man-in-the-middle between the RCA MM36110 monitor MCU and its Toshiba TA1300AN
+frequency detection IC. It suppresses the spurious `reg 0x00 = 0x80` (33.75 kHz) write the MCU issues roughly every 7.2 s while a
+15 kHz source is shown on VGA. This removes the infamous "garbage pixel artifacts" mentioned on the CRT database.
+
+It also detects 24kHz input for purposes of my still-in-development 24kHz medium resolution mod. 
+
+This software would not be possible without Martin Hejnfelt's original TA1276AN I2C Bridge (also some inspiration taken from bsafta's fork). 
+basfta fork: https://github.com/bsafta/TDA9151B-i2c-bridge 
+original: https://github.com/skumlos/TDA9151B-i2c-bridge 
 
 ## Suppression logic
 
-The `0x80` write is replaced with `0x00` only when **all** of these hold:
+The `0x80` write is replaced with `0x00` only when **both** of these hold:
 
-1. The VGA pin is high.
+1. The input switching IC's VGA pin is high.
 2. The bridge's own background poll of the TA1300AN read registers has reported a 15 kHz horizontal
    frequency (read byte 1: H-OUT set, H FREQ DET `Y` in 30..45, i.e. ~12.6-18.9 kHz; 15.75 kHz reads ~37,
    31.5 kHz ~75, 33.75 kHz ~80) for `H15K_STABLE_COUNT` consecutive polls, and the last valid poll is
@@ -22,12 +28,10 @@ Thresholds are `#define`s at the top of the sketch.
 ## 24 kHz detection output
 
 `OUT24K_PIN` (D7 / PD7) is driven high while the TA1300AN reports a 24 kHz horizontal input and VGA is active.
-From a real capture, H FREQ DET `Y` reads 38 at 15 kHz, 57-60 at 24 kHz and 75 at 31.5 kHz, so the 24 kHz
+Logic analyzer capture shows that H FREQ DET `Y` reads 38 at 15 kHz, 57-60 at 24 kHz and 75 at 31.5 kHz, so the 24 kHz
 window is `Y` 50..66 (`H24K_Y_MIN`/`H24K_Y_MAX`).
 
 - Asserted after `H24K_STABLE_COUNT` consecutive in-window polls.
 - Released after `H24K_RELEASE_COUNT` consecutive polls with a non-zero, non-24 kHz `Y`.
 - `Y == 0` (sync lost during a mode change) holds the current state.
 - Released if no 24 kHz reading for `H24K_STALE_MS`, on a failed poll, or when VGA goes inactive.
-
-D6 remains the VGA-active input.
