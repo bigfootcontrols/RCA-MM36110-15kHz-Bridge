@@ -7,8 +7,8 @@ frequency detection IC. It suppresses the spurious `reg 0x00 = 0x80` (33.75 kHz)
 It also detects 24kHz input for purposes of my still-in-development 24kHz medium resolution mod. 
 
 This software would not be possible without Martin Hejnfelt's original TA1276AN I2C Bridge (also some inspiration taken from bsafta's fork). 
-basfta fork: https://github.com/bsafta/TDA9151B-i2c-bridge 
-original: https://github.com/skumlos/TDA9151B-i2c-bridge 
+basfta fork: https://github.com/bsafta/ta1276an-i2c-bridge 
+original: https://github.com/skumlos/ta1276an-i2c-bridge 
 
 ## Suppression logic
 
