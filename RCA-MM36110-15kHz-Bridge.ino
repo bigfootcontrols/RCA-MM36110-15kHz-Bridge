@@ -29,11 +29,11 @@ volatile bool VGAactive = false;
 // READ_DELAY defines how often the bridge refreshes a cached downstream read value.
 // Keep this relatively slow so the bridge spends less time bit-banging while the
 // monitor MCU could start a transaction.
-#define READ_DELAY 250
+#define READ_DELAY 50
 #define CHECK_DELAY 250 
-#define BUS_IDLE_GUARD_US 7000
-#define RX_FRAME_MAX 16
-#define RX_QUEUE_SIZE 18
+#define BUS_IDLE_GUARD_US 3000
+#define RX_FRAME_MAX 10
+#define RX_QUEUE_SIZE 9
 
 // TA1300AN H FREQ DET (read byte 1, bits 6:0) is Y = 5 * Z * fH, with Z ~= 476us.
 // 15.75kHz -> Y ~= 37, 31.5kHz -> Y ~= 75, 33.75kHz -> Y ~= 80. 0 = no sync, 0x7F = >53kHz.
