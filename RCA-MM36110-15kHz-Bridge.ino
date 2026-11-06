@@ -29,9 +29,9 @@ volatile bool VGAactive = false;
 // READ_DELAY defines how often the bridge refreshes a cached downstream read value.
 // Keep this relatively slow so the bridge spends less time bit-banging while the
 // monitor MCU could start a transaction.
-#define READ_DELAY 50
+#define READ_DELAY 45
 #define CHECK_DELAY 250 
-#define BUS_IDLE_GUARD_US 3000
+#define BUS_IDLE_GUARD_US 2500
 #define RX_FRAME_MAX 10
 #define RX_QUEUE_SIZE 9
 
