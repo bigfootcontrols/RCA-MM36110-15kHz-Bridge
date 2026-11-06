@@ -26,9 +26,7 @@
 // Value that tells functions whether VGA inputs are active or not.
 volatile bool VGAactive = false;
 
-// READ_DELAY defines how often the bridge refreshes a cached downstream read value.
-// Keep this relatively slow so the bridge spends less time bit-banging while the
-// monitor MCU could start a transaction.
+// READ_DELAY controls background frequency detection while VGA is active.
 #define READ_DELAY 50
 #define CHECK_DELAY 250 
 #define BUS_IDLE_GUARD_US 3000
@@ -51,7 +49,8 @@ volatile bool VGAactive = false;
 #define H24K_STALE_MS 2000    // no 24kHz reading for this long -> release the output (fail safe)
 #define PENDING_REPLAY_MS 1000 // how long a suppressed write may be replayed if frequency leaves 15kHz
 
-#define I2C_TIMEOUT 10000
+// SoftI2CMaster specifies this timeout in milliseconds.
+#define I2C_TIMEOUT 10
 #define I2C_PULLUP 0
 #define I2C_FASTMODE 1
 
@@ -65,6 +64,7 @@ volatile bool VGAactive = false;
 
 #include <SoftI2CMaster.h>
 #include <Wire.h>
+#include <util/atomic.h>
 #define TA1300AN_ADDR (0x24)
  
 #define PROBLEM_REG (0x00) // the problematic register 
@@ -89,7 +89,7 @@ uint8_t h24kCount = 0;           // consecutive polls inside the 24kHz window
 uint8_t h24kMiss = 0;            // consecutive polls clearly outside the 24kHz window
 uint32_t lastH24kMs = 0;         // millis() of the last in-window 24kHz poll
 bool out24k = false;             // current state of the 24kHz output pin
-bool suppressPending = false;    // a 0x80 write was suppressed and may need replaying
+volatile bool suppressPending = false; // a 0x80 write was suppressed and may need replaying
 uint32_t suppressPendingMs = 0;  // millis() when it was first suppressed
 
 void setup() {
@@ -146,13 +146,22 @@ void writeRequest(int byteCount) {
   }
 }
 
-// Set up two-byte array to hold values read from TA1300AN
-volatile uint8_t r[2] = {0, 0};
-
 void readRequest() {
   lastMcuActivityUs = micros();
-  uint8_t buf[2] = { r[0], r[1] };
+  // Forward writes received before this read, including the register pointer.
+  RxFrame frame;
+  while (popFrame(frame)) {
+    processFrame(frame);
+  }
+
+  uint8_t buf[2] = {0xFF, 0xFF};
+  if (i2c_start((TA1300AN_ADDR << 1) | I2C_READ)) {
+    buf[0] = i2c_read(false);
+    buf[1] = i2c_read(true);
+  }
+  i2c_stop();
   Wire.write(buf, 2);
+  lastMcuActivityUs = micros();
 }
 
 bool isMcuBusIdle() {
@@ -161,19 +170,13 @@ bool isMcuBusIdle() {
 }
 
 bool popFrame(RxFrame &out) {
-  noInterrupts();
-  if (rxCount == 0) {
-    interrupts();
-    return false;
-  }
-
+  if (rxCount == 0) return false;
   out.len = rxQueue[rxTail].len;
   for (uint8_t i = 0; i < out.len; ++i) {
     out.bytes[i] = rxQueue[rxTail].bytes[i];
   }
   rxTail = (rxTail + 1) % RX_QUEUE_SIZE;
   --rxCount;
-  interrupts();
   return true;
 }
 
@@ -249,18 +252,14 @@ void readDownstream() {
  
   if (!i2c_start((TA1300AN_ADDR << 1) | I2C_READ)) {
     i2c_stop();
-    h15kCount = 0; // no ACK: don't trust the cache, fail open
+    h15kCount = 0; // no ACK: fail open
     h24kCount = 0;
     update24kOutput(millis());
     return;
   }
-  uint8_t tmp0 = i2c_read(false); //read byte and proceed to next
-  uint8_t tmp1 = i2c_read(true);  // send stop signal
+  i2c_read(false);
+  uint8_t tmp1 = i2c_read(true);
   i2c_stop();
-  noInterrupts();
-  r[0] = tmp0; //write to array
-  r[1] = tmp1;
-  interrupts();
 
   lastValidPollMs = millis();
   if (hDetIs15k(tmp1)) {
@@ -307,24 +306,41 @@ void loop() {
  // Non-blocking: check mod status every ~250ms.
   if (now - lastCheck >= CHECK_DELAY) {
     lastCheck = now;
-    VGAactive = (PIND & (1 << VGA_PIN)); //NOTE this uses direct addressing for speed
+    bool nextVGA = (PIND & (1 << VGA_PIN));
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+      if (nextVGA != VGAactive) {
+        h15kCount = 0;
+        h24kCount = 0;
+        h24kMiss = 0;
+      }
+      VGAactive = nextVGA;
+    }
     update24kOutput(now);
   }
 
-  if (isMcuBusIdle()) {
-    RxFrame frame;
-    if (popFrame(frame)) {
-      processFrame(frame);
-      // Favor write servicing over background reads.
-      return;
+  {
+    bool processed = false;
+    // The Wire callbacks also use the downstream bus. Keep each transaction
+    // and its queue removal atomic so the callback cannot interleave with it.
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+      RxFrame frame;
+      if (isMcuBusIdle() && popFrame(frame)) {
+        processFrame(frame);
+        processed = true;
+      }
     }
+    if (processed) return;
   }
 
   if (now - lastCheckRead >= READ_DELAY) {
     lastCheckRead = now;
-    if (isMcuBusIdle() && rxCount == 0) {
-      readDownstream();
-      servicePendingReplay();
+    if (VGAactive || suppressPending) {
+      ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+        if (isMcuBusIdle() && rxCount == 0) {
+          readDownstream();
+          servicePendingReplay();
+        }
+      }
     }
   }
 }

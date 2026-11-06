@@ -25,6 +25,20 @@ suppressed and the IC then reports a non-15 kHz input within `PENDING_REPLAY_MS`
 so a legitimate mode change is only delayed. The monitor's own `0x00` correction clears the pending replay.
 Thresholds are `#define`s at the top of the sketch.
 
+## MCU reads and component input
+
+The bridge forwards queued writes before servicing an MCU read, then reads both bytes
+directly from the TA1300AN instead of returning a periodically refreshed cache. The MCU
+bus is clock-stretched during this operation, so timing should be checked on the actual
+monitor. If the downstream device does not acknowledge the read address, the bridge
+returns `FF FF`; the upstream read address has already been acknowledged and cannot
+be NACKed retroactively. A genuine `FF FF` reading is indistinguishable from this error.
+Downstream clock stretching is limited to 10 ms by `I2C_TIMEOUT`.
+
+Background frequency polling runs only while VGA is active, or while a suppressed
+write is awaiting replay. Component mode is still a software bridge, not an electrical
+passthrough: writes can be delayed, and reads require clock stretching.
+
 ## 24 kHz detection output
 
 `OUT24K_PIN` (D7 / PD7) is driven high while the TA1300AN reports a 24 kHz horizontal input and VGA is active.
