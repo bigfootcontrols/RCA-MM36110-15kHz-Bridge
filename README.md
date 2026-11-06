@@ -33,7 +33,8 @@ bus is clock-stretched during this operation, so timing should be checked on the
 monitor. If the downstream device does not acknowledge the read address, the bridge
 returns `FF FF`; the upstream read address has already been acknowledged and cannot
 be NACKed retroactively. A genuine `FF FF` reading is indistinguishable from this error.
-Downstream clock stretching is limited to 10 ms by `I2C_TIMEOUT`.
+Each downstream SCL-low wait is limited to 10 ms by `I2C_TIMEOUT`; a transaction or
+queued writes followed by a read can take longer.
 
 Background frequency polling runs only while VGA is active, or while a suppressed
 write is awaiting replay. Component mode is still a software bridge, not an electrical
