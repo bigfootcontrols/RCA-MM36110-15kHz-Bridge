@@ -18,7 +18,7 @@
  * mode change is delayed, never lost.
  * 
  * It also outputs a signal when 24kHz horizontal frequency is detected, for the purpose of
- * activating my still-in-development 24kHz medium resolution mod. 
+ * activating my 24kHz medium resolution mod. 
  */
 
  //Version 1.1
