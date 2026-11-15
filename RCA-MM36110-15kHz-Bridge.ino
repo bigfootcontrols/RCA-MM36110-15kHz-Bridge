@@ -60,8 +60,8 @@ volatile bool VGAactive = false;
 #define SDA_PIN 4 // = PD4 - don't forget to add 2.7k pullup resistor to VCC
 #define SCL_PORT PORTD
 #define SCL_PIN 5 // = PD5 - - don't forget to add 2.7k pullup resistor to VCC
-#define OUT24K_PIN 7 // = PD7 - driven high while the chassis is attempting 24kHz and VGA is active
-#define OUT24K_PIN2 8 // = PB0 - exact duplicate of OUT24K_PIN
+#define OUT24K_PIN 7 // = PD7 - driven high while the chassis is attempting 24kHz and VGA is active - activates 24khz relay
+#define OUT24K_PIN2 8 // = PB0 - exact duplicate of OUT24K_PIN - used for activating deflection adjustments
 #define VGA_PIN 6 // = PD6 - this is the pin that when high activates the mod - use a 10k pulldown to ground
 
 #include <SoftI2CMaster.h>
