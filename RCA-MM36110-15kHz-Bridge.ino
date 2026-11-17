@@ -70,6 +70,7 @@ volatile bool VGAactive = false;
  
 #define PROBLEM_REG (0x00) // the problematic register 
 #define PROBLEM_VAL (0x80) // the problematic value
+#define PROBLEM_VAL_2 (0x0C) // weird glitch caused when Gemstar Guide+ is set to antenna instead of cable
 
 struct RxFrame {
   uint8_t len;
@@ -225,12 +226,12 @@ void processFrame(const RxFrame &frame) {
 
   if (frame.len > 1) {
     uint8_t reg = frame.bytes[0];
-    bool suppress = VGAactive && input15kStable(millis());
+    bool suppress = input15kStable(millis());
 
     for (uint8_t i = 1; i < frame.len; ++i) {
       uint8_t val = frame.bytes[i];
       if (reg == PROBLEM_REG) {
-        if (val == PROBLEM_VAL && suppress) {
+        if (val == (PROBLEM_VAL || PROBLEM_VAL_2) && suppress) {
           val = 0x00;
           if (!suppressPending) {
             suppressPending = true;
