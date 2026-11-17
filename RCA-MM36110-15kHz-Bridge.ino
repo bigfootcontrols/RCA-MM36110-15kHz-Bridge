@@ -219,7 +219,7 @@ void processFrame(const RxFrame &frame) {
   }
 
   if (frame.len == 2 && frame.bytes[0] == PROBLEM_REG && frame.bytes[1] == 0x8C &&
-      VGAactive && input15kStable(millis())) {
+      input15kStable(millis())) {
     return;
   }
 
