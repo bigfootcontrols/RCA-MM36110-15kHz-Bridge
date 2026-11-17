@@ -231,7 +231,13 @@ void processFrame(const RxFrame &frame) {
     for (uint8_t i = 1; i < frame.len; ++i) {
       uint8_t val = frame.bytes[i];
       if (reg == PROBLEM_REG) {
-        if (val == (PROBLEM_VAL || PROBLEM_VAL_2) && suppress) {
+        if (val == PROBLEM_VAL && suppress) {
+          val = 0x00;
+          if (!suppressPending) {
+            suppressPending = true;
+            suppressPendingMs = millis();
+          }
+         if (val == PROBLEM_VAL_2 && suppress) {
           val = 0x00;
           if (!suppressPending) {
             suppressPending = true;
