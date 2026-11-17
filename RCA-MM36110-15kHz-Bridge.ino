@@ -237,6 +237,7 @@ void processFrame(const RxFrame &frame) {
             suppressPending = true;
             suppressPendingMs = millis();
           }
+        }
          if (val == PROBLEM_VAL_2 && suppress) {
           val = 0x00;
           if (!suppressPending) {
