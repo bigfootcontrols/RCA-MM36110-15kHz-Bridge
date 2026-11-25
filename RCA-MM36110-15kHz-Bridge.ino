@@ -62,6 +62,7 @@ volatile bool VGAactive = false;
 #define SCL_PIN 5 // = PD5 - - don't forget to add 2.7k pullup resistor to VCC
 #define OUT24K_PIN 7 // = PD7 - driven high while the chassis is attempting 24kHz and VGA is active - activates 24khz relay
 #define OUT24K_PIN2 8 // = PB0 - exact duplicate of OUT24K_PIN - used for activating deflection adjustments
+#define OUT24K_PIN3 9 // = PB1 - exact duplicate of OUT24K_PIN
 #define VGA_PIN 6 // = PD6 - this is the pin that when high activates the mod - use a 10k pulldown to ground
 
 #include <SoftI2CMaster.h>
@@ -112,6 +113,8 @@ void setup() {
   digitalWrite(OUT24K_PIN, LOW);
   pinMode(OUT24K_PIN2, OUTPUT);
   digitalWrite(OUT24K_PIN2, LOW);
+  pinMode(OUT24K_PIN3, OUTPUT);
+  digitalWrite(OUT24K_PIN3, LOW);
   VGAactive = (PIND & (1 << VGA_PIN)); // direct addressing, faster
 }
 
@@ -185,7 +188,7 @@ bool hDetIs24k(const uint8_t b1) {
   return (b1 & H_OUT_BIT) && y >= H24K_Y_MIN && y <= H24K_Y_MAX;
 }
 
-// Asserts OUT24K_PIN after a stable 24kHz reading and releases it after a stable non-24kHz
+// Asserts the 24kHz outputs after a stable 24kHz reading and releases them after a stable non-24kHz
 // reading. Y == 0 (sync lost during a mode change) holds the current state; a stale or
 // failed poll, or VGA going inactive, releases it.
 void update24kOutput(const uint32_t now) {
@@ -201,6 +204,7 @@ void update24kOutput(const uint32_t now) {
     out24k = next;
     digitalWrite(OUT24K_PIN, out24k ? HIGH : LOW);
     digitalWrite(OUT24K_PIN2, out24k ? HIGH : LOW);
+    digitalWrite(OUT24K_PIN3, out24k ? HIGH : LOW);
   }
 }
 

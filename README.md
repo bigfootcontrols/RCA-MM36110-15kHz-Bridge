@@ -27,7 +27,8 @@ Thresholds are `#define`s at the top of the sketch.
 
 ## 24 kHz detection output
 
-`OUT24K_PIN` (D7 / PD7) is driven high while the TA1300AN reports a 24 kHz horizontal input and VGA is active.
+`OUT24K_PIN` (D7 / PD7), `OUT24K_PIN2` (D8 / PB0), and `OUT24K_PIN3` (D9 / PB1) share the same 24 kHz
+output behavior. They are driven high while the TA1300AN reports a 24 kHz horizontal input and VGA is active.
 Logic analyzer capture shows that H FREQ DET `Y` reads 38 at 15 kHz, 57-60 at 24 kHz and 75 at 31.5 kHz, so the 24 kHz
 window is `Y` 50..66 (`H24K_Y_MIN`/`H24K_Y_MAX`).
 
